@@ -98,13 +98,19 @@ class InPlaceExecutionContext {
   void ForEachNeighborWithinRadius(Functor<void, const Agent*, double>& lambda,
                                    const Agent& query, double squared_radius);
 
-  Agent* GetAgent(const AgentUid& uid);
+  Agent* GetAgent(const AgentUid& uid, int64_t* cache_id = nullptr);
 
-  const Agent* GetConstAgent(const AgentUid& uid);
+  const Agent* GetConstAgent(const AgentUid& uid, int64_t* cache_id = nullptr);
 
   void RemoveFromSimulation(const AgentUid& uid);
 
+  bool IsCacheValid(int64_t cache) const;
+
+  static void UpdateLoadBalance();
+
  private:
+  static int64_t kCacheCounter;
+  static int64_t kCacheCounterLastLoadBalance;
   /// Lookup table AgentUid -> AgentPointer for new created agents
   std::shared_ptr<ThreadSafeAgentUidMap> new_agent_map_;
 
@@ -114,6 +120,7 @@ class InPlaceExecutionContext {
   /// iteration.
   std::vector<AgentUid> remove_;
   std::vector<Spinlock*> locks;
+  std::vector<Spinlock*> locks2;
 
   /// Pointer to new agents
   std::vector<Agent*> new_agents_;

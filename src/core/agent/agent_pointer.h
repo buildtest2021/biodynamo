@@ -19,11 +19,12 @@
 #include <limits>
 #include <ostream>
 #include <type_traits>
-
+#include <mutex>
 #include "core/agent/agent_uid.h"
 #include "core/execution_context/in_place_exec_ctxt.h"
 #include "core/simulation.h"
 #include "core/util/root.h"
+#include "core/util/spinlock.h"
 
 namespace bdm {
 
@@ -47,7 +48,25 @@ class AgentPointer {
 
   virtual ~AgentPointer() {}
 
+  AgentPointer(const AgentPointer& other)
+    : uid_(other.uid_)
+    , cache_agent_(other.cache_agent_)
+    , cache_id_(other.cache_id_)
+    {}
+
   uint64_t GetUid() const { return uid_; }
+
+  
+  AgentPointer& operator=(const AgentPointer& other) {
+    if (this != &other) {
+    std::lock_guard<Spinlock> guard(lock_);
+      uid_ = other.uid_;
+      // reset to invalid cache state to avoid race conditions in op->
+      cache_agent_ = nullptr;
+      cache_id_ = -1;
+    }
+    return *this;
+  }
 
   /// Equals operator that enables the following statement `agent_ptr ==
   /// nullptr;`
@@ -78,20 +97,39 @@ class AgentPointer {
   /// Assignment operator that changes the internal representation to nullptr.
   /// Makes the following statement possible `agent_ptr = nullptr;`
   AgentPointer& operator=(std::nullptr_t) {
+    std::lock_guard<Spinlock> guard(lock_);
     uid_ = AgentUid();
+    cache_agent_ = nullptr;
+    cache_id_ = -1;
     return *this;
   }
 
   TAgent* operator->() {
     assert(*this != nullptr);
+    auto* local_cache_agent = cache_agent_; 
+    auto local_cache_id = cache_id_; 
     auto* ctxt = Simulation::GetActive()->GetExecutionContext();
-    return Cast<Agent, TAgent>(ctxt->GetAgent(uid_));
+    if (local_cache_agent && ctxt->IsCacheValid(local_cache_id)) {
+      return local_cache_agent;
+    }
+    std::lock_guard<Spinlock> guard(lock_);
+    auto* agent =  Cast<Agent, TAgent>(ctxt->GetAgent(uid_, &cache_id_));
+    cache_agent_ = agent;
+    return agent;
   }
 
   const TAgent* operator->() const {
     assert(*this != nullptr);
+    auto* local_cache_agent = cache_agent_; 
+    auto local_cache_id = cache_id_; 
     auto* ctxt = Simulation::GetActive()->GetExecutionContext();
-    return Cast<const Agent, const TAgent>(ctxt->GetConstAgent(uid_));
+    if (local_cache_agent && ctxt->IsCacheValid(local_cache_id)) {
+      return const_cast<const TAgent*>(local_cache_agent);
+    }
+    std::lock_guard<Spinlock> guard(lock_);
+    auto* agent =  Cast<const Agent, const TAgent>(ctxt->GetConstAgent(uid_, &cache_id_));
+    cache_agent_ = const_cast<TAgent*>(agent); 
+    return agent;
   }
 
   friend std::ostream& operator<<(std::ostream& str,
@@ -112,6 +150,9 @@ class AgentPointer {
 
  private:
   AgentUid uid_;
+  mutable TAgent* cache_agent_ = nullptr;
+  mutable int64_t cache_id_ = -1;
+  mutable Spinlock lock_;
 
   template <typename TFrom, typename TTo>
   typename std::enable_if<std::is_base_of<TFrom, TTo>::value, TTo*>::type Cast(

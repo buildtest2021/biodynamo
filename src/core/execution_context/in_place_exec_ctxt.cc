@@ -170,6 +170,7 @@ void InPlaceExecutionContext::TearDownIterationAll(
 
   rm->EndOfIteration();
 
+  kCacheCounter++;
   new_agent_map_->DeleteOldCopies();
   if (rm->GetNumAgents() > new_agent_map_->Size()) {
     new_agent_map_->Resize(rm->GetNumAgents() * 1.5);
@@ -183,10 +184,31 @@ void InPlaceExecutionContext::Execute(
 
   if (param->thread_safety_mechanism ==
       Param::ThreadSafetyMechanism::kUserSpecified) {
-    agent->CriticalRegion(&locks);
-    std::sort(locks.begin(), locks.end());
-    for (auto* l : locks) {
-      l->lock();
+    while(true) {
+      locks.clear();
+      locks2.clear();
+      agent->CriticalRegion(&locks);
+      std::sort(locks.begin(), locks.end());
+      for (auto* l : locks) {
+        l->lock();
+      }
+      agent->CriticalRegion(&locks2);
+      std::sort(locks2.begin(), locks2.end());
+      bool same = true;
+      if (locks.size() == locks2.size()) {
+        for( uint64_t i = 0; i < locks.size(); ++i) {
+          if (locks[i] != locks2[i]) {
+            same = false;
+            break;
+          }
+        }
+      } else {
+        same = false;
+      }
+      if (same) { break; }
+      for (auto* l : locks) {
+        l->unlock();
+      }
     }
     neighbor_cache_.clear();
     for (auto& op : operations) {
@@ -195,7 +217,6 @@ void InPlaceExecutionContext::Execute(
     for (auto* l : locks) {
       l->unlock();
     }
-    locks.clear();
   } else if (param->thread_safety_mechanism ==
              Param::ThreadSafetyMechanism::kAutomatic) {
     auto* nb_mutex_builder = env->GetNeighborMutexBuilder();
@@ -304,10 +325,13 @@ void InPlaceExecutionContext::ForEachNeighborWithinRadius(
   env->ForEachNeighbor(for_each, query);
 }
 
-Agent* InPlaceExecutionContext::GetAgent(const AgentUid& uid) {
+Agent* InPlaceExecutionContext::GetAgent(const AgentUid& uid, int64_t* cache_id) {
   auto* sim = Simulation::GetActive();
   auto* rm = sim->GetResourceManager();
   auto* agent = rm->GetAgent(uid);
+  if (cache_id) {
+    *cache_id = kCacheCounterLastLoadBalance;
+  }
   if (agent != nullptr) {
     return agent;
   }
@@ -316,12 +340,23 @@ Agent* InPlaceExecutionContext::GetAgent(const AgentUid& uid) {
   return (*new_agent_map_)[uid].first;
 }
 
-const Agent* InPlaceExecutionContext::GetConstAgent(const AgentUid& uid) {
-  return GetAgent(uid);
+const Agent* InPlaceExecutionContext::GetConstAgent(const AgentUid& uid, int64_t* cache_id) {
+  return GetAgent(uid, cache_id);
 }
 
 void InPlaceExecutionContext::RemoveFromSimulation(const AgentUid& uid) {
   remove_.push_back(uid);
+}
+
+int64_t InPlaceExecutionContext::kCacheCounter = 0;
+int64_t InPlaceExecutionContext::kCacheCounterLastLoadBalance = 0;
+
+bool InPlaceExecutionContext::IsCacheValid(int64_t cache_id) const {
+  return cache_id == kCacheCounterLastLoadBalance;
+}
+
+void InPlaceExecutionContext::UpdateLoadBalance() {
+  kCacheCounterLastLoadBalance = kCacheCounter;
 }
 
 // TODO(lukas) Add tests for caching mechanism in ForEachNeighbor*
