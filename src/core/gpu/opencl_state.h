@@ -18,6 +18,10 @@ namespace bdm {
 
 class OpenCLState {
  public:
+  void SetInitialization(bool b) { initialized_ = b; }
+
+  bool IsInitialized() { return initialized_; }
+
   /// Returns the OpenCL Context
   cl::Context* GetOpenCLContext() { return &opencl_context_; }
 
@@ -195,6 +199,8 @@ class OpenCLState {
   // Currently only support for one GPU device
   std::vector<cl::Device> opencl_devices_;    //!
   std::vector<cl::Program> opencl_programs_;  //!
+  // Flag to check if OpenCL was initialized correctly
+  bool initialized_ = false;
 };
 
 }  // namespace bdm
@@ -206,11 +212,8 @@ class OpenCLState {
 namespace bdm {
 
 class OpenCLState {
-  static OpenCLState* GetInstance() {
-    Log::Fatal("OpenCLState::GetInstance",
-               "You did not compile BioDynaMo with OpenCL");
-    return nullptr;
-  }
+ public:
+  bool IsInitialized() { return false; }
 };
 
 }  // namespace bdm

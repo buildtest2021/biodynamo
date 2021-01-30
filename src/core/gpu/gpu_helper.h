@@ -185,8 +185,9 @@ class GpuHelper {
       }
 
       if (devices->empty()) {
-        Log::Fatal("FindGpuDevicesOpenCL",
-                   "No OpenCL compatible GPU's found on this machine!");
+        Log::Error("FindGpuDevicesOpenCL",
+                   "No OpenCL compatible GPU's found on this machine! "
+                   "Scheduling CPU operations instead of OpenCL operations.");
         return;
       }
 
@@ -211,6 +212,7 @@ class GpuHelper {
 
       // Compile the OpenCL kernels
       CompileOpenCLKernels();
+      ocl_state->SetInitialization(true);
     } catch (const cl::Error& err) {
       Log::Error("FindGpuDevicesOpenCL", "OpenCL error: ", err.what(), "(",
                  err.err(), ")");
@@ -228,8 +230,7 @@ class GpuHelper {
       Log::Fatal(
           "InitializeGPUEnvironment",
           "You tried to use the GPU (OpenCL) version of BioDynaMo, but no "
-          "OpenCL installation was detected on this machine. Switching to "
-          "the CPU version...");
+          "OpenCL installation was detected on this machine.");
 #endif  // USE_OPENCL
     } else {
 #ifdef USE_CUDA
@@ -237,8 +238,7 @@ class GpuHelper {
 #else
       Log::Fatal("InitializeGPUEnvironment",
                  "You tried to use the GPU (CUDA) version of BioDynaMo, but no "
-                 "CUDA installation was detected on this machine. Switching to "
-                 "the CPU version...");
+                 "CUDA installation was detected on this machine.");
 #endif  // USE_CUDA
     }
 #endif  // defined(USE_CUDA) || defined(USE_OPENCL) && !defined(__ROOTCLING__)
